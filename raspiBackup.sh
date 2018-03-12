@@ -56,11 +56,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-03-11 08:35:59 +0100$"
+GIT_DATE="$Date: 2018-03-11 19:37:03 +0100$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: 81d74e1$"
+GIT_COMMIT="$Sha1: 0b28eba$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -143,6 +143,7 @@ POSSIBLE_LOG_LOCs=""
 for K in "${!LOG_OUTPUT_LOCs[@]}"; do
 	[[ -z $POSSIBLE_LOG_LOCs ]] && POSSIBLE_LOG_LOCs="${LOG_OUTPUTs[$K]}: ${LOG_OUTPUT_LOCs[$K]}" || POSSIBLE_LOG_LOCs="$POSSIBLE_LOG_LOCs | ${LOG_OUTPUTs[$K]}: ${LOG_OUTPUT_LOCs[$K]}"
 done
+POSSIBLE_LOG_LOCs="$POSSIBLE_LOG_LOCs | {logFilename}"
 
 # message option constants
 
@@ -1154,7 +1155,7 @@ function logIntoOutput() { # logtype message
 				echo "$dte: ${LOG_TYPEs[$type]} $indent $@" >> "$LOG_MAIL_FILE"
 				;;
 			*)
-				assertionFailed $LINENO "Invalid log destination $LOG_OUTPUT"
+				echo "$dte: ${LOG_TYPEs[$type]} $indent $@" >> "$LOG_FILE"
 				;;
 		esac
 	fi
@@ -1382,7 +1383,7 @@ function substituteNumberArguments() {
 		fi
 	fi
 
-	if [[ $LOG_OUTPUT < 0 || $LOG_OUTPUT > ${#LOG_OUTPUT_LOCs[@]} ]]; then
+	if [[ "$LOG_OUTPUT" < 0 || "$LOG_OUTPUT" > ${#LOG_OUTPUT_LOCs[@]} ]]; then
 		lo=$(tr '[:lower:]' '[:upper:]'<<< $LOG_OUTPUT)
 		loa=$(tr '[:lower:]' '[:upper:]'<<< ${LOG_OUTPUT_ARGs[$lo]+abc})
 		if [[ $loa == "ABC" ]]; then
@@ -1979,7 +1980,7 @@ function setupEnvironment() {
 			NEW_BACKUP_DIRECTORY_CREATED=1
 		fi
 
-		BACKUPPATH=$(sed -E 's@/+$@@g' <<< "$BACKUPPATH")
+		BACKUPPATH="$(sed -E 's@/+$@@g' <<< "$BACKUPPATH")"
 
 		if [[ ! -d "$BACKUPPATH" ]]; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_FILE_ARG_NOT_FOUND "$BACKUPPATH"
@@ -1994,12 +1995,12 @@ function setupEnvironment() {
 		fi
 
 	else
-		LOG_OUTPUT=$LOG_OUTPUT_HOME
+		LOG_OUTPUT="$LOG_OUTPUT_HOME"
 	fi
 
 	TMP_LOG_FILE="$HOSTNAME-$MYNAME.log"
 
-	if [[ $LOG_OUTPUT == $LOG_OUTPUT_VARLOG ]]; then
+	if [[ "$LOG_OUTPUT" == "$LOG_OUTPUT_VARLOG" ]]; then
 		LOG_BASE="/var/log/$MYNAME"
 		if [ ! -d ${LOG_BASE} ]; then
 		 if ! mkdir -p ${LOG_BASE}; then
@@ -2008,10 +2009,12 @@ function setupEnvironment() {
 		 fi
 		fi
 		LOG_FILE="$LOG_BASE/$HOSTNAME.log"
-	elif [[ $LOG_OUTPUT == $LOG_OUTPUT_HOME ]]; then
+	elif [[ "$LOG_OUTPUT" == "$LOG_OUTPUT_HOME" ]]; then
 		LOG_FILE="$CURRENT_DIR/$MYNAME.log"
-	else
+	elif [[ "$LOG_OUTPUT" == "$LOG_OUTPUT_SYSLOG" ]]; then
 		LOG_FILE="/var/log/syslog"
+	else
+		LOG_FILE=$LOG_OUTPUT
 	fi
 
 	LOG_FILE_FINAL="$LOG_FILE"
@@ -2542,9 +2545,16 @@ function checkAndCorrectImportantParameters() {
 		local invalidLogLevel=""
 		local invalidMsgLevel=""
 
-		if [[ $LOG_OUTPUT < 0 || $LOG_OUTPUT > ${#LOG_OUTPUT_LOCs[@]} ]]; then
-			invalidOutput=$LOG_OUTPUT
-			LOG_OUTPUT=$LOG_OUTPUT_SYSLOG
+		if [[ "$LOG_OUTPUT" =~ [0-9]+ ]]; then
+			if [[ $LOG_OUTPUT < 0 || $LOG_OUTPUT > ${#LOG_OUTPUT_LOCs[@]} ]]; then
+				invalidOutput=$LOG_OUTPUT
+				LOG_OUTPUT=$LOG_OUTPUT_SYSLOG
+			fi
+		else
+			if ! touch "$LOG_OUTPUT" &>/dev/null; then
+				invalidOutput="$LOG_OUTPUT"
+				LOG_OUTPUT=$LOG_OUTPUT_SYSLOG
+			fi
 		fi
 
 		if [[ $LOG_LEVEL < 0 || $LOG_LEVEL > ${#LOG_LEVELs[@]} ]]; then
