@@ -31,7 +31,7 @@ if [ ! -n "$BASH" ] ;then
    exit 127
 fi
 
-VERSION="0.6.3.2"	# -beta or -hotfix suffixes possible
+VERSION="0.6.3.3-dev"	# -beta, -hotfix or -dev suffixes allowed
 
 # add pathes if not already set (usually not set in crontab)
 
@@ -49,6 +49,8 @@ fi
 
 grep -iq beta <<< "$VERSION"
 IS_BETA=$((! $? ))
+grep -iq dev <<< "$VERSION"
+IS_DEV=$((! $? ))
 grep -iq hotfix <<< "$VERSION"
 IS_HOTFIX=$((! $? ))
 
@@ -56,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-03-11 19:37:03 +0100$"
+GIT_DATE="$Date: 2018-03-16 21:09:07 +0100$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: 0b28eba$"
+GIT_COMMIT="$Sha1: 5659ee1$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -834,6 +836,13 @@ MSG_DE[$MSG_ADJUSTING_DISABLED]="RBK0191E: Ziel %1 mit %2 ist kleiner als die Ba
 #MSG_TAR_EXT_OPT_RESTORE=191
 #MSG_EN[$MSG_TAR_EXT_OPT_RESTORE]="RBK0191I: Restoring extended attributes and acls with tar"
 #MSG_DE[$MSG_TAR_EXT_OPT_RESTORE]="RBK0191I: Extended Attribute und ACLs werden mit tar zurückgesichert"
+MSG_INTRO_DEV_MESSAGE=192
+MSG_EN[$MSG_INTRO_DEV_MESSAGE]="RBK0192W: =========> NOTE  <========= \
+${NL}!!! RBK0173W: This is a development version and should not be used in production. \
+${NL}!!! RBK0173W: =========> NOTE <========="
+MSG_DE[$MSG_INTRO_DEV_MESSAGE]="RBK0192W: =========> HINWEIS <========= \
+${NL}!!! RBK0173W: Dieses ist ein Entwicklerversion welcher nicht in Produktion benutzt werden sollte. \
+${NL}!!! RBK0173W: =========> HINWEIS <========="
 
 declare -A MSG_HEADER=( ['I']="---" ['W']="!!!" ['E']="???" )
 
@@ -1241,6 +1250,7 @@ function logOptions() {
 	logItem "ZIP_BACKUP=$ZIP_BACKUP"
 	logItem "RESIZE_ROOTFS=$RESIZE_ROOTFS"
 	logItem "TIMESTAMPS=$TIMESTAMPS"
+	logItem "RSYNC_IGNORE_ERRORS=$RSYNC_IGNORE_ERRORS"
 }
 
 LOG_MAIL_FILE="/tmp/${MYNAME}.maillog"
@@ -1645,8 +1655,8 @@ function isNewVersionAvailable() {
 			if [[ -z $suffix ]]; then
 				rc=1	# no suffix, current version is latest version
 			else
-				if (( $IS_BETA )); then
-					rc=0	# current is beta version, replace with final version
+				if (( $IS_BETA || $IS_DEV )); then
+					rc=0	# current is beta or development version, replace with final version
 				elif (( $IS_HOTFIX )); then
 					rc=2	# current version is hotfix, keep it until new version is available
 				else
@@ -3024,7 +3034,7 @@ function rsyncBackup() { # partition number (for partition based backup)
 		executeCommand "$fakecmd"
 		rc=0
 	elif (( ! $FAKE )); then
-		executeCommand "$cmd"
+		executeCommand "$cmd" "$RSYNC_IGNORE_ERRORS"
 		rc=$?
 	fi
 
@@ -5489,6 +5499,7 @@ set -- $PARAMS
 writeToConsole $MSG_LEVEL_MINIMAL $MSG_STARTED "$HOSTNAME" "$MYSELF" "$VERSION" "$(date)" "$GIT_COMMIT_ONLY"
 (( $IS_BETA )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_BETA_MESSAGE
 (( $IS_HOTFIX )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_HOTFIX_MESSAGE
+(( $IS_DEV )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_DEV_MESSAGE
 
 fileParameter="$1"
 if [[ -n "$1" ]]; then
