@@ -6,12 +6,11 @@ import (
 	"path"
 )
 
-const Version = "v0.8"
-const GitDate = "$Date: 2017-10-31 12:03:40 +0100$"
-const GitSHA = "$Sha1: ed54e5e$"
+// Version -
+const Version = "v0.7"
 
 func main() {
 
-	fmt.Printf("%s\n", path.Base(os.Args[0]))
+	fmt.Printf("Hello %s %s\n", path.Base(os.Args[0]), Version)
 
 }
