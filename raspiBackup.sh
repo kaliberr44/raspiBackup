@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-03-16 21:09:07 +0100$"
+GIT_DATE="$Date: 2018-03-17 21:17:07 +0100$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: 5659ee1$"
+GIT_COMMIT="$Sha1: d8f5d0e$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -2382,7 +2382,7 @@ EOF
 }
 
 function extractVersionFromFile() { # fileName
-	echo $(grep "^VERSION=" "$1" | cut -f 2 -d = | sed  "s/\"//g" | sed "s/ .*#.*//")
+	echo $(grep "^VERSION=" "$1" | cut -f 2 -d = | sed  "s/\"//g" | sed "s/#.*//")
 }
 
 function revertScriptVersion() {
@@ -5129,7 +5129,7 @@ function mentionHelp() {
 }
 
 function checkOptionParameter() { # option parameter
-	if [[ $2 =~ -+ || -z $2 ]]; then
+	if [[ "$2" =~ ^(\-|\+|\-\-|\+\+)[^=\s]+$ || -z $2 ]]; then
 		writeToConsole $MSG_LEVEL_MINIMAL $MSG_OPTION_REQUIRES_PARAMETER "$1"
 		exitError $RC_PARAMETER_ERROR
 	fi
@@ -5452,7 +5452,7 @@ while (( "$#" )); do
 	  ;;
 
     -V)
-	  REVERT=1
+	  REVERT=1; shift 1
 	  ;;
 
     -x|-x[-+])
@@ -5498,7 +5498,6 @@ set -- $PARAMS
 
 writeToConsole $MSG_LEVEL_MINIMAL $MSG_STARTED "$HOSTNAME" "$MYSELF" "$VERSION" "$(date)" "$GIT_COMMIT_ONLY"
 (( $IS_BETA )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_BETA_MESSAGE
-(( $IS_HOTFIX )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_HOTFIX_MESSAGE
 (( $IS_DEV )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_DEV_MESSAGE
 
 fileParameter="$1"
