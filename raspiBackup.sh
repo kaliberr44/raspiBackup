@@ -31,7 +31,7 @@ if [ ! -n "$BASH" ] ;then
    exit 127
 fi
 
-VERSION="0.6.3.3-dev"	# -beta, -hotfix or -dev suffixes allowed
+VERSION="0.6.3.2-dev"	# -beta, -hotfix or -dev suffixes allowed
 
 # add pathes if not already set (usually not set in crontab)
 
@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-03-16 21:09:07 +0100$"
+GIT_DATE="$Date: 2018-03-18 14:05:20 +0100$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: 5659ee1$"
+GIT_COMMIT="$Sha1: b96bdfa$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -1251,6 +1251,7 @@ function logOptions() {
 	logItem "RESIZE_ROOTFS=$RESIZE_ROOTFS"
 	logItem "TIMESTAMPS=$TIMESTAMPS"
 	logItem "RSYNC_IGNORE_ERRORS=$RSYNC_IGNORE_ERRORS"
+	logItem "TAR_IGNORE_ERRORS=$TAR_IGNORE_ERRORS"
 }
 
 LOG_MAIL_FILE="/tmp/${MYNAME}.maillog"
@@ -2382,7 +2383,7 @@ EOF
 }
 
 function extractVersionFromFile() { # fileName
-	echo $(grep "^VERSION=" "$1" | cut -f 2 -d = | sed  "s/\"//g" | sed "s/ .*#.*//")
+	echo $(grep "^VERSION=" "$1" | cut -f 2 -d = | sed  "s/\"//g" | sed "s/#.*//")
 }
 
 function revertScriptVersion() {
@@ -2944,7 +2945,7 @@ function tarBackup() {
 		executeCommand "$fakecmd"
 		rc=0
 	elif (( ! $FAKE )); then
-		executeCommand "${pvCmd}${cmd}"
+		executeCommand "${pvCmd}${cmd}" "$TAR_IGNORE_ERRORS"
 		rc=$?
 	fi
 
@@ -5129,7 +5130,7 @@ function mentionHelp() {
 }
 
 function checkOptionParameter() { # option parameter
-	if [[ $2 =~ -+ || -z $2 ]]; then
+	if [[ "$2" =~ ^(\-|\+|\-\-|\+\+)[^=\s]+$ || -z $2 ]]; then
 		writeToConsole $MSG_LEVEL_MINIMAL $MSG_OPTION_REQUIRES_PARAMETER "$1"
 		exitError $RC_PARAMETER_ERROR
 	fi
@@ -5452,7 +5453,7 @@ while (( "$#" )); do
 	  ;;
 
     -V)
-	  REVERT=1
+	  REVERT=1; shift 1
 	  ;;
 
     -x|-x[-+])
@@ -5498,7 +5499,6 @@ set -- $PARAMS
 
 writeToConsole $MSG_LEVEL_MINIMAL $MSG_STARTED "$HOSTNAME" "$MYSELF" "$VERSION" "$(date)" "$GIT_COMMIT_ONLY"
 (( $IS_BETA )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_BETA_MESSAGE
-(( $IS_HOTFIX )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_HOTFIX_MESSAGE
 (( $IS_DEV )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_DEV_MESSAGE
 
 fileParameter="$1"
