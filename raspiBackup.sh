@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-03-30 23:26:25 +0200$"
+GIT_DATE="$Date: 2018-04-01 22:49:21 +0200$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: a6afcd4$"
+GIT_COMMIT="$Sha1: 3dba2c0$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -1280,6 +1280,7 @@ function logOptions() {
 	logItem "TIMESTAMPS=$TIMESTAMPS"
 	logItem "SYSTEMSTATUS=$SYSTEMSTATUS"
 	logItem "RSYNC_IGNORE_ERRORS=$RSYNC_IGNORE_ERRORS"
+	logItem "TAR_IGNORE_ERRORS=$TAR_IGNORE_ERRORS"
 }
 
 LOG_MAIL_FILE="/tmp/${MYNAME}.maillog"
@@ -1356,7 +1357,7 @@ DEFAULT_LINK_BOOTPARTITIONFILES=0
 # save boot partition with tar
 DEFAULT_TAR_BOOT_PARTITION_ENABLED=0
 # Change these options only if you know what you are doing !!!
-DEFAULT_RSYNC_BACKUP_OPTIONS="--delete -aHAxX"
+DEFAULT_RSYNC_BACKUP_OPTIONS="-aHAxX"
 DEFAULT_RSYNC_BACKUP_ADDITIONAL_OPTIONS=""
 DEFAULT_TAR_BACKUP_OPTIONS="-cpi"
 DEFAULT_TAR_BACKUP_ADDITIONAL_OPTIONS=""
@@ -2978,7 +2979,7 @@ function tarBackup() {
 		executeCommand "$fakecmd"
 		rc=0
 	elif (( ! $FAKE )); then
-		executeCommand "${pvCmd}${cmd}"
+		executeCommand "${pvCmd}${cmd}" "$TAR_IGNORE_ERRORS"
 		rc=$?
 	fi
 
