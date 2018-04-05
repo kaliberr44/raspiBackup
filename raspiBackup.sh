@@ -31,7 +31,7 @@ if [ ! -n "$BASH" ] ;then
    exit 127
 fi
 
-VERSION="0.6.3.2-dev"	# -beta, -hotfix or -dev suffixes allowed
+VERSION="0.6.3.3-dev"	# -beta, -hotfix or -dev suffixes allowed
 
 # add pathes if not already set (usually not set in crontab)
 
@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-03-18 14:05:20 +0100$"
+GIT_DATE="$Date: 2018-04-03 20:46:06 +0200$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: b96bdfa$"
+GIT_COMMIT="$Sha1: fb034fb$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -204,6 +204,10 @@ STOPPED_SERVICES=0
 BOOT_TAR_EXT="tmg"
 BOOT_DD_EXT="img"
 
+# [command]=package
+declare -A REQUIRED_COMMANDS=( ["parted"]="parted" ["fsck.vfat"]="dosfstools" ["e2label"]="e2fsprogs" ["dosfslabel"]="dosfstools" ["fdisk"]="util-linux" ["blkid"]="util-linux" ["sfdisk"]="util-linux" )
+# ["btrfs"]="btrfs-tools"
+
 # possible script exit codes
 
 RC_ASSERTION=101
@@ -225,6 +229,7 @@ RC_RESTORE_FAILED=116
 RC_NATIVE_RESTORE_FAILED=117
 RC_DEVICES_NOTFOUND=118
 RC_CREATE_ERROR=119
+RC_MISSING_COMMANDS=120
 
 LOGGING_ENABLED=0
 
@@ -780,8 +785,8 @@ MSG_DE[$MSG_INTRO_HOTFIX_MESSAGE]="RBK0173W: =========> HINWEIS <========= \
 ${NL}!!! RBK0173W: Dieses ist ein temporärer Hotfix welcher nicht in Produktion benutzt werden sollte. \
 ${NL}!!! RBK0173W: =========> HINWEIS <========="
 MSG_TOOL_ERROR_SKIP=174
-MSG_EN[$MSG_TOOL_ERROR_SKIP]="RBK0174I: Backup tool %1 error %2 ignored. Errormessages:$NL%3"
-MSG_DE[$MSG_TOOL_ERROR_SKIP]="RBK0174I: Backupprogramm %1 Fehler %2 wurde ignoriert. Fehlermeldungen:$NL%3"
+MSG_EN[$MSG_TOOL_ERROR_SKIP]="RBK0174I: Backup tool %1 error %2 ignored. For errormessages see log file."
+MSG_DE[$MSG_TOOL_ERROR_SKIP]="RBK0174I: Backupprogramm %1 Fehler %2 wurde ignoriert. Fehlermeldungen finden sich im Logfile."
 MSG_SCRIPT_UPDATE_NOT_REQUIRED=175
 MSG_EN[$MSG_SCRIPT_UPDATE_NOT_REQUIRED]="RBK0175I: %1 version %2 is newer than version %3."
 MSG_DE[$MSG_SCRIPT_UPDATE_NOT_REQUIRED]="RBK0175I: %1 Version %2 ist aktueller als Version %3."
@@ -843,6 +848,18 @@ ${NL}!!! RBK0173W: =========> NOTE <========="
 MSG_DE[$MSG_INTRO_DEV_MESSAGE]="RBK0192W: =========> HINWEIS <========= \
 ${NL}!!! RBK0173W: Dieses ist ein Entwicklerversion welcher nicht in Produktion benutzt werden sollte. \
 ${NL}!!! RBK0173W: =========> HINWEIS <========="
+MSG_MISSING_COMMANDS=193
+MSG_EN[$MSG_MISSING_COMMANDS]="RBK0193E: Missing required commands %1."
+MSG_DE[$MSG_MISSING_COMMANDS]="RBK0193E: Erforderliche Befehle %1 nicht vorhanden."
+MSG_MISSING_PACKAGES=194
+MSG_EN[$MSG_MISSING_PACKAGES]="RBK0194E: Missing required packages %1."
+MSG_DE[$MSG_MISSING_PACKAGES]="RBK0194E: Erforderliche Pakete %1 nicht installiert."
+MSG_SAVE_LOGFILE=195
+MSG_EN[$MSG_SAVE_LOGFILE]="RBK0195I: Logfile saved in %1."
+MSG_DE[$MSG_SAVE_LOGFILE]="RBK0195I: Logdatei wird in %1 gesichert."
+MSG_NO_HARDLINKS_USED=196
+MSG_EN[$MSG_NO_HARDLINKS_USED]="RBK0196W: No hardlinks supported on %1."
+MSG_DE[$MSG_NO_HARDLINKS_USED]="RBK0196W: %1 unterstützt keine Hardlinks."
 
 declare -A MSG_HEADER=( ['I']="---" ['W']="!!!" ['E']="???" )
 
@@ -935,7 +952,7 @@ function callExtensions() { # extensionplugpoint rc
 		shift 1
 		local args=( "$@" )
 
-		if which $extensionFileName 2>&1 1>/dev/null; then
+		if which $extensionFileName &>/dev/null; then
 			logItem "Calling $extensionFileName"
 			$extensionFileName "${args[@]}"
 			local rc=$?
@@ -954,7 +971,7 @@ function callExtensions() { # extensionplugpoint rc
 
 			local extensionFileName="${MYNAME}_${extension}_$1.sh"
 
-			if which $extensionFileName 2>&1 1>/dev/null; then
+			if which $extensionFileName &>/dev/null; then
 				logItem "Calling $extensionFileName $2"
 				executeShellCommand ". $extensionFileName $2"
 				local rc=$?
@@ -1107,20 +1124,20 @@ function executeCommand() { # command - rc's to accept
 	else
 		eval "$1" &>"$LOG_TOOL_FILE"
 		rc=$?
-		cat "$LOG_TOOL_FILE" >> "$LOG_FILE"
 	fi
 	if (( $rc != 0 )); then
 		local error=1
 		for i in ${@:2}; do
 			if (( $i == $rc )); then
-				writeToConsole $MSG_LEVEL_DETAILED $MSG_TOOL_ERROR_SKIP "$BACKUPTYPE" $rc "$(< $LOG_TOOL_FILE)"
+				writeToConsole $MSG_LEVEL_DETAILED $MSG_TOOL_ERROR_SKIP "$BACKUPTYPE" $rc
+				logItem "$(< $LOG_TOOL_FILE)"
 				rc=0
 				error=0
 				break
 			fi
 		done
 		if (( $error )) && [[ -f $LOG_TOOL_FILE ]]; then
-			writeToConsole $MSG_LEVEL_MINIMAL $MSG_TOOL_ERROR "$BACKUPTYPE" $rc "$(< $LOG_TOOL_FILE)"
+			echo "$(< $LOG_TOOL_FILE)"
 		fi
 	fi
 	rm -f "$LOG_TOOL_FILE" &>>$LOG_FILE
@@ -1197,12 +1214,29 @@ function logExit() { # message
 	fi
 }
 
+function logSystem() {
+	logEntry "logSystem"
+	[[ -f /etc/os-release ]] &&	logItem "$(cat /etc/os-release)"
+	[[ -f /etc/debian_version ]] &&	logItem "$(cat /etc/debian_version)"
+	logExit "logSystem"
+}
+
+function logSystemStatus() {
+
+	logEntry "logSystemStatus"
+
+	if (( $SYSTEMSTATUS )); then
+		logItem "service --status-all$NL$(service --status-all 2>&1)"
+		logItem "lsof$NL$(lsof / | awk 'NR==1 || $4~/[0-9][uw]/' 2>1)"
+	fi
+
+	logExit "logSystemStatus"
+
+}
+
 function logOptions() {
 
 	logEntry "logOptions"
-
-	[[ -f /etc/os-release ]] &&	logItem "$(cat /etc/os-release)"
-	[[ -f /etc/debian_version ]] &&	logItem "$(cat /etc/debian_version)"
 
 	logItem "$(uname -a)"
 
@@ -1250,8 +1284,10 @@ function logOptions() {
 	logItem "ZIP_BACKUP=$ZIP_BACKUP"
 	logItem "RESIZE_ROOTFS=$RESIZE_ROOTFS"
 	logItem "TIMESTAMPS=$TIMESTAMPS"
+	logItem "SYSTEMSTATUS=$SYSTEMSTATUS"
 	logItem "RSYNC_IGNORE_ERRORS=$RSYNC_IGNORE_ERRORS"
 	logItem "TAR_IGNORE_ERRORS=$TAR_IGNORE_ERRORS"
+	logItem "USE_HARDLINKS=$USE_HARDLINKS"
 }
 
 LOG_MAIL_FILE="/tmp/${MYNAME}.maillog"
@@ -1325,32 +1361,31 @@ DEFAULT_DEPLOYMENT_HOSTS=""
 DEFAULT_YES_NO_RESTORE_DEVICE="loop"
 # Use hardlinks for partitionbootfiles
 DEFAULT_LINK_BOOTPARTITIONFILES=0
+# use hardlinks for rsync if possible
+DEFAULT_USE_HARDLINKS=1
 # save boot partition with tar
 DEFAULT_TAR_BOOT_PARTITION_ENABLED=0
 # Change these options only if you know what you are doing !!!
-DEFAULT_RSYNC_BACKUP_OPTIONS="-aHAx"
+DEFAULT_RSYNC_BACKUP_OPTIONS="-aHAxX"
 DEFAULT_RSYNC_BACKUP_ADDITIONAL_OPTIONS=""
 DEFAULT_TAR_BACKUP_OPTIONS="-cpi"
 DEFAULT_TAR_BACKUP_ADDITIONAL_OPTIONS=""
 DEFAULT_TAR_RESTORE_ADDITIONAL_OPTIONS=""
-
 # Use with care !
 DEFAULT_MAIL_ON_ERROR_ONLY=0
-
 # If version is marked as deprecated and buggy then update version
 DEFAULT_HANDLE_DEPRECATED=1
-
 # report uuid
 DEFAULT_USE_UUID=1
-
 # Check for back blocks when formating restore device (Will take a long time)
 DEFAULT_CHECK_FOR_BAD_BLOCKS=0
-
 # Resize root filesystem during restore
 DEFAULT_RESIZE_ROOTFS=1
-
 # add timestamps in front of messages
 DEFAULT_TIMESTAMPS=0
+
+# add system status in debug log (Attention: may expose sensible information)
+DEFAULT_SYSTEMSTATUS=0
 
 ############# End default config section #############
 
@@ -1699,12 +1734,15 @@ function stopServices() {
 			fi
 		fi
 	fi
+	logSystemStatus
 	logExit "stopServices"
 }
 
 function startServices() { # noexit
 
 	logEntry "startServices"
+
+	logSystemStatus
 
 	if [[ -n "$STARTSERVICES" ]]; then
 		if [[ "$STARTSERVICES" =~ $NOOP_AO_ARG_REGEX ]]; then
@@ -1825,7 +1863,7 @@ function supportsHardlinks() {	# directory
 	logEntry "supportsHardlinks: $1"
 
 	local links
-	local result=1
+	local result=1 # no
 
 	touch /$1/$MYNAME.hlinkfile
 	cp -l /$1/$MYNAME.hlinkfile /$1/$MYNAME.hlinklink
@@ -1846,11 +1884,10 @@ function supportsSymlinks() {	# directory
 
 	logEntry "supportsSymlinks: $1"
 
+	local result=1	# no
 	touch /$1/$MYNAME.slinkfile
 	ln -s /$1/$MYNAME.slinkfile /$1/$MYNAME.slinklink
-	links=$(ls -la /$1/$MYNAME.slinkfile | wc -l)
-	logItem "Links: $links"
-	[[ $links == 2 ]] && result=0
+	[[ -L /$1/$MYNAME.slinklink ]] && result=0
 	rm -f /$1/$MYNAME.slinkfile &>/dev/null
 	rm -f /$1/$MYNAME.slinklink &>/dev/null
 
@@ -1882,6 +1919,15 @@ function getFsType() { # file or path
     echo $fstype
 
     logExit "getFsType: $fstype"
+
+}
+
+function assertCommandAvailable() { # command package
+
+	if ! command -v $1 &> /dev/null; then
+		writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_INSTALLED_FILE "$1" "$2"
+		exitError $RC_MISSING_COMMANDS
+	fi
 
 }
 
@@ -2249,6 +2295,9 @@ function cleanupBackupDirectory() {
 			writeToConsole $MSG_LEVEL_DETAILED $MSG_SAVING_LOG "$LOG_FILE"
 			if (( $BACKUP_STARTED )); then
 				writeToConsole $MSG_LEVEL_MINIMAL $MSG_REMOVING_BACKUP "$BACKUPTARGET_DIR"
+			fi
+			if [[ $LOG_OUTPUT == $LOG_OUTPUT_BACKUPLOC ]]; then
+				writeToConsole $MSG_LEVEL_MINIMAL $MSG_SAVE_LOGFILE "$LOG_FILE"
 			fi
 			if [[ -d "$BACKUPTARGET_DIR" ]]; then
 				writeToConsole $MSG_LEVEL_MINIMAL $MSG_CLEANING_BACKUPDIRECTORY "$BACKUPTARGET_DIR"
@@ -2926,6 +2975,8 @@ function tarBackup() {
 		--warning=no-xdev \
 		--numeric-owner \
 		--exclude=\"$BACKUPPATH_PARAMETER/*\" \
+		--exclude=\"$LOG_FILE\" \
+		--exclude='.gvfs' \
 		--exclude=proc/* \
 		--exclude=lost+found/* \
 		--exclude=sys/* \
@@ -2989,10 +3040,9 @@ function rsyncBackup() { # partition number (for partition based backup)
 
 	logItem "LastBackupDir: $lastBackupDir"
 
-	if  [[ -z "$lastBackupDir" ]]; then
-		LINK_DEST=""
-	else
-		LINK_DEST="--link-dest=\"$lastBackupDir\""
+	LINK_DEST=""
+	if (( $USE_HARDLINKS && $ROOT_HARDLINKS_SUPPORTED )); then
+		[[ -n "$lastBackupDir" ]] && LINK_DEST="--link-dest=\"$lastBackupDir\""
 	fi
 
 	logItem "LinkDest: $LINK_DEST"
@@ -3004,6 +3054,8 @@ function rsyncBackup() { # partition number (for partition based backup)
 	writeToConsole $MSG_LEVEL_MINIMAL $MSG_MAIN_BACKUP_PROGRESSING $BACKUPTYPE "${target//\\/}"
 
 	cmdParms="--exclude=\"$BACKUPPATH_PARAMETER\" \
+			--exclude=\"$LOG_FILE\" \
+			--exclude='.gvfs' \
 			--exclude=$excludeRoot/proc/* \
 			--exclude=$excludeRoot/lost+found/* \
 			--exclude=$excludeRoot/sys/* \
@@ -3351,18 +3403,20 @@ function backup() {
 
 	logItem "Storing backup in backuppath $BACKUPPATH"
 
-	logItem "mount:$NL$(mount)"
-	logItem "df -h:$NL$(df -h)"
-	logItem "blkid:$NL$(blkid)"
+	if (( ! $REGRESSION_TEST )) ; then
+		logItem "mount:$NL$(mount)"
+		logItem "df -h:$NL$(df -h)"
+		logItem "blkid:$NL$(blkid)"
 
-	logItem "fdisk -l $BOOT_DEVICENAME"
-	logItem "$(fdisk -l $BOOT_DEVICENAME)"
+		logItem "fdisk -l $BOOT_DEVICENAME"
+		logItem "$(fdisk -l $BOOT_DEVICENAME)"
 
-	logItem "/boot/cmdline.txt"
-	logItem "$(cat /boot/cmdline.txt)"
+		logItem "/boot/cmdline.txt"
+		logItem "$(cat /boot/cmdline.txt)"
 
-	logItem "/etc/fstab"
-	logItem "$(cat /etc/fstab)"
+		logItem "/etc/fstab"
+		logItem "$(cat /etc/fstab)"
+	fi
 
 	logItem "Starting $BACKUPTYPE backup..."
 
@@ -3741,10 +3795,10 @@ function commonChecks() {
 		fi
 		if [[ ! $(which $EMAIL_PROGRAM) && ( $EMAIL_PROGRAM != $EMAIL_EXTENSION_PROGRAM ) ]]; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_MAILPROGRAM_NOT_INSTALLED $EMAIL_PROGRAM
-			exitError $RC_MISSING_FILES
+			exitError $RC_MISSING_COMMANDS
 		fi
 		if [[ "$MAIL_PROGRAM" == $EMAIL_SSMTP_PROGRAM && (( $APPEND_LOG )) ]]; then
-			if [[ ! $(which mpack) ]]; then
+			if ! which mpack &>/dev/null; then
 				writeToConsole $MSG_LEVEL_MINIMAL $MSG_MPACK_NOT_INSTALLED
 				APPEND_LOG=0
 			fi
@@ -3989,14 +4043,18 @@ function doitBackup() {
 	fi
 
 	if [[ "$BACKUPTYPE" == "$BACKUPTYPE_RSYNC" ]]; then
-		if [[ ! $(which rsync) ]]; then
+		if ! which rsync &>/dev/null; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_INSTALLED_FILE "rsync" "rsync"
-			exitError $RC_PARAMETER_ERROR
+			exitError $RC_MISSING_COMMANDS
 		fi
 		if (( ! $SKIP_RSYNC_CHECK )); then
 			if ! supportsHardlinks "$BACKUPPATH"; then
-				writeToConsole $MSG_LEVEL_MINIMAL $MSG_FILESYSTEM_INCORRECT "$BACKUPPATH" "hardlinks"
-				exitError $RC_PARAMETER_ERROR
+				ROOT_HARDLINKS_SUPPORTED=0
+				if (( $USE_HARDLINKS )); then
+					writeToConsole $MSG_LEVEL_MINIMAL $MSG_NO_HARDLINKS_USED "$BACKUPPATH"
+				fi
+			else
+				ROOT_HARDLINKS_SUPPORTED=1
 			fi
 			if ! supportsSymlinks "$BACKUPPATH"; then
 				writeToConsole $MSG_LEVEL_MINIMAL $MSG_FILESYSTEM_INCORRECT "$BACKUPPATH" "softlinks"
@@ -4029,9 +4087,9 @@ function doitBackup() {
 		exitError $RC_PARAMETER_ERROR
 	fi
 
-	if (( $PROGRESS )) && [[ "$BACKUPTYPE" == "$BACKUPTYPE_DD" || "$BACKUPTYPE" == "$BACKUPTYPE_DDZ" ]] && [[ ! $(which pv) ]]; then
+	if (( $PROGRESS )) && [[ "$BACKUPTYPE" == "$BACKUPTYPE_DD" || "$BACKUPTYPE" == "$BACKUPTYPE_DDZ" ]] && [[ ! $(which pv &>/dev/null) ]]; then
 		writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_INSTALLED_FILE "pv" "pv"
-		exitError $RC_PARAMETER_ERROR
+		exitError $RC_MISSING_COMMANDS
 	fi
 
 	if (( $PARTITIONBASED_BACKUP )); then
@@ -4809,7 +4867,7 @@ function doitRestore() {
 		exitError $RC_PARAMETER_ERROR
 	fi
 
-	if (( $PROGRESS )) && [[ "$BACKUPTYPE" == "$BACKUPTYPE_DD" || "$BACKUPTYPE" == "$BACKUPTYPE_DDZ" ]] && [[ ! $(which pv) ]]; then
+	if (( $PROGRESS )) && [[ "$BACKUPTYPE" == "$BACKUPTYPE_DD" || "$BACKUPTYPE" == "$BACKUPTYPE_DDZ" ]] && [[ ! $(which pv &>/dev/null) ]]; then
 		writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_INSTALLED_FILE "pv" "pv"
 		exitError $RC_PARAMETER_ERROR
 	fi
@@ -4838,9 +4896,9 @@ function doitRestore() {
 	logItem "Date: $DATE"
 
 	if [[ "$BACKUPTYPE" == "$BACKUPTYPE_RSYNC" ]]; then
-		if [[ ! $(which rsync) ]]; then
+		if ! which rsync &>/dev/null; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_INSTALLED_FILE "rsync" "rsync"
-			exitError $RC_PARAMETER_ERROR
+			exitError $RC_MISSING_COMMANDS
 		fi
 		local rsyncVersion=$(rsync --version | head -n 1 | awk '{ print $3 }')
 		logItem "rsync version: $rsyncVersion"
@@ -4851,9 +4909,9 @@ function doitRestore() {
 	fi
 
 	if (( $PARTITIONBASED_BACKUP )); then
-		if ! $(which dosfslabel &>/dev/null); then
+		if ! which dosfslabel &>/dev/null; then
 			writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_INSTALLED_FILE "dosfslabel" "dosfstools"
-			exitError $RC_MISSING_FILES
+			exitError $RC_MISSING_COMMANDS
 		fi
 	fi
 
@@ -5000,6 +5058,29 @@ function synchronizeCmdlineAndfstab() {
 	umount $ROOT_MP
 
 	logExit "syncronizeCmdlineAndfstab"
+}
+
+function check4RequiredCommands() {
+
+	local missing_commands missing_packages
+
+	for cmd in "${!REQUIRED_COMMANDS[@]}"; do
+		if ! command -v $cmd > /dev/null; then
+			missing_commands="$cmd $missing_commands "
+			missing_packages="${REQUIRED_COMMANDS[$cmd]} $missing_packages "
+		fi
+	done
+
+	if [[ -n "$missing_commands" ]]; then
+		shopt -s extglob
+		missing_commands="${missing_commands%%*( )}"
+		missing_packages="${missing_packages%%*( )}"
+		shopt -u extglob
+		writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_COMMANDS "$missing_commands"
+		writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_PACKAGES "$missing_packages"
+		exitError $RC_MISSING_COMMANDS
+	fi
+
 }
 
 function lockingFramework() {
@@ -5204,6 +5285,8 @@ TAR_BOOT_PARTITION_ENABLED=$DEFAULT_TAR_BOOT_PARTITION_ENABLED
 CHECK_FOR_BAD_BLOCKS=$DEFAULT_CHECK_FOR_BAD_BLOCKS
 RESIZE_ROOTFS=$DEFAULT_RESIZE_ROOTFS
 TIMESTAMPS=$DEFAULT_TIMESTAMPS
+SYSTEMSTATUS=$DEFAULT_SYSTEMSTATUS
+USE_HARDLINKS=$DEFAULT_USE_HARDLINKS
 
 if [[ -z $DEFAULT_LANGUAGE ]]; then
 	LANG_EXT=${LANG^^*}
@@ -5237,6 +5320,8 @@ ROOT_PARTITION_DEFINED=0
 SKIP_RSYNC_CHECK=0
 SKIP_SFDISK=0
 UPDATE_MYSELF=0
+ROOT_HARDLINKS_SUPPORTED=0
+USE_HARDLINKS=1
 
 PARAMS=""
 
@@ -5328,6 +5413,10 @@ while (( "$#" )); do
 	  HELP=1; break
 	  ;;
 
+	--hardlinks|--hardlinks[+-])
+	  USE_HARDLINKS=$(getEnableDisableOption "$1"); shift 1
+	  ;;
+
     -i|-i[-+])
 	  USE_UUID=$(getEnableDisableOption "$1"); shift 1
 	  ;;
@@ -5413,6 +5502,14 @@ while (( "$#" )); do
 
     -S|-S[-+])
 	  FORCE_UPDATE=$(getEnableDisableOption "$1"); shift 1
+	  ;;
+
+	--systemstatus|--systemstatus[+-])
+	  SYSTEMSTATUS=$(getEnableDisableOption "$1"); shift 1
+      if ! which lsof &>/dev/null; then
+		 writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_INSTALLED_FILE "lsof" "lsof"
+		 exitError $RC_MISSING_COMMANDS
+	  fi
 	  ;;
 
     -t)
@@ -5555,6 +5652,7 @@ fi
 
 substituteNumberArguments
 checkAndCorrectImportantParameters	# no return if errors detected
+check4RequiredCommands
 
 if (( $RESTORE )) && [[ -n $fileParameter ]]; then
 	RESTOREFILE="$(readlink -f "$fileParameter")"
@@ -5568,6 +5666,7 @@ fi
 
 setupEnvironment
 logOptions						# config parms already read
+logSystem
 
 if (( ! $RESTORE )); then
 	lockingFramework
