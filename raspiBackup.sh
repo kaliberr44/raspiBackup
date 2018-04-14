@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-04-03 20:46:06 +0200$"
+GIT_DATE="$Date: 2018-04-08 17:49:09 +0200$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: fb034fb$"
+GIT_COMMIT="$Sha1: af15c2c$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -85,7 +85,7 @@ PROPERTY_URL="$MYHOMEURL/downloads/raspibackup0613-properties/download"
 VERSION_URL_EN="$MYHOMEURL/en/versionhistory"
 VERSION_URL_DE="$MYHOMEURL/de/versionshistorie"
 LATEST_TEMP_PROPERTY_FILE="/tmp/$MYNAME.properties"
-DOWNLOAD_TIMEOUT=3 # seconds
+DOWNLOAD_TIMEOUT=60 # seconds
 DOWNLOAD_RETRIES=3
 
 # debug option constants
@@ -849,17 +849,20 @@ MSG_DE[$MSG_INTRO_DEV_MESSAGE]="RBK0192W: =========> HINWEIS <========= \
 ${NL}!!! RBK0173W: Dieses ist ein Entwicklerversion welcher nicht in Produktion benutzt werden sollte. \
 ${NL}!!! RBK0173W: =========> HINWEIS <========="
 MSG_MISSING_COMMANDS=193
-MSG_EN[$MSG_MISSING_COMMANDS]="RBK0193E: Missing required commands %1."
-MSG_DE[$MSG_MISSING_COMMANDS]="RBK0193E: Erforderliche Befehle %1 nicht vorhanden."
+MSG_EN[$MSG_MISSING_COMMANDS]="RBK0193E: Missing required commands '%1'."
+MSG_DE[$MSG_MISSING_COMMANDS]="RBK0193E: Erforderliche Befehle '%1' nicht vorhanden."
 MSG_MISSING_PACKAGES=194
-MSG_EN[$MSG_MISSING_PACKAGES]="RBK0194E: Missing required packages %1."
-MSG_DE[$MSG_MISSING_PACKAGES]="RBK0194E: Erforderliche Pakete %1 nicht installiert."
+MSG_EN[$MSG_MISSING_PACKAGES]="RBK0194E: Missing required packages '%1'."
+MSG_DE[$MSG_MISSING_PACKAGES]="RBK0194E: Erforderliche Pakete '%1' nicht installiert."
 MSG_SAVE_LOGFILE=195
 MSG_EN[$MSG_SAVE_LOGFILE]="RBK0195I: Logfile saved in %1."
 MSG_DE[$MSG_SAVE_LOGFILE]="RBK0195I: Logdatei wird in %1 gesichert."
 MSG_NO_HARDLINKS_USED=196
 MSG_EN[$MSG_NO_HARDLINKS_USED]="RBK0196W: No hardlinks supported on %1."
 MSG_DE[$MSG_NO_HARDLINKS_USED]="RBK0196W: %1 unterstützt keine Hardlinks."
+MSG_EMAIL_SEND_FAILED=197
+MSG_EN[$MSG_EMAIL_SEND_FAILED]="RBK0197E: eMail send command %1 failed with RC %2."
+MSG_DE[$MSG_EMAIL_SEND_FAILED]="RBK0197E: eMail mit %1 versenden endet fehlerhaft mit RC %2."
 
 declare -A MSG_HEADER=( ['I']="---" ['W']="!!!" ['E']="???" )
 
@@ -1227,7 +1230,7 @@ function logSystemStatus() {
 
 	if (( $SYSTEMSTATUS )); then
 		logItem "service --status-all$NL$(service --status-all 2>&1)"
-		logItem "lsof$NL$(lsof / | awk 'NR==1 || $4~/[0-9][uw]/' 2>1)"
+		logItem "lsof$NL$(lsof / | awk 'NR==1 || $4~/[0-9][uw]/' 2>&1)"
 	fi
 
 	logExit "logSystemStatus"
@@ -2239,27 +2242,27 @@ function sendEMail() { # content subject
 
 		case $EMAIL_PROGRAM in
 			$EMAIL_MAILX_PROGRAM) logItem "echo $content | $EMAIL_PROGRAM $EMAIL_PARMS -s $subject $attach $EMAIL"
-				echo "$content" | "$EMAIL_PROGRAM" $EMAIL_PARMS -s "$subject" $attach "$EMAIL"
+				( echo "$content" | "$EMAIL_PROGRAM" $EMAIL_PARMS -s "$subject" $attach "$EMAIL" ) &>> $LOG_FILE
 				rc=$?
-				logItem "$EMAIL_PROGRAM: RC: $rc"
+				(( $rc )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_EMAIL_SEND_FAILED "$EMAIL_MAILX_PROGRAM" $rc
 				;;
 			$EMAIL_SENDEMAIL_PROGRAM) logItem "echo $content | $EMAIL_PROGRAM $EMAIL_PARMS -u $subject $attach -t $EMAIL"
-				echo "$content" | "$EMAIL_PROGRAM" $EMAIL_PARMS -u "$subject" $attach -t "$EMAIL"
+				( echo "$content" | "$EMAIL_PROGRAM" $EMAIL_PARMS -u "$subject" $attach -t "$EMAIL" ) &>> $LOG_FILE
 				rc=$?
-				logItem "$EMAIL_PROGRAM: RC: $rc"
+				(( $rc )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_EMAIL_SEND_FAILED "$EMAIL_SENDEMAIL_PROGRAM" $rc
 				;;
 			$EMAIL_SSMTP_PROGRAM)
 				if (( $APPEND_LOG )); then
 					logItem "Sending email with mpack"
 					echo "$content" > /tmp/$$
-					mpack -s "$subject" -d /tmp/$$ "$LOG_FILE" "$EMAIL"
+					mpack -s "$subject" -d /tmp/$$ "$LOG_FILE" "$EMAIL" &>> $LOG_FILE
 					rm /tmp/$$ &>/dev/null
 				else
 					logItem "Sendig email with ssmtp"
 					logItem "echo -e To: $EMAIL\nFrom: root@$(hostname -f)\nSubject: $subject\n$content | $EMAIL_PROGRAM $EMAIL"
-					echo -e "To: $EMAIL\nFrom: root@$(hostname -f)\nSubject: $subject\n$content" | "$EMAIL_PROGRAM" "$EMAIL"
+					( echo -e "To: $EMAIL\nFrom: root@$(hostname -f)\nSubject: $subject\n$content" | "$EMAIL_PROGRAM" "$EMAIL" ) &>> $LOG_FILE
 					rc=$?
-					logItem "$EMAIL_PROGRAM: RC: $rc"
+					(( $rc )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_EMAIL_SEND_FAILED "$EMAIL_SSMTP_PROGRAM" $rc
 				fi
 				;;
 			$EMAIL_EXTENSION_PROGRAM)
@@ -5062,6 +5065,8 @@ function synchronizeCmdlineAndfstab() {
 
 function check4RequiredCommands() {
 
+	logEntry "check4RequiredCommands"
+
 	local missing_commands missing_packages
 
 	for cmd in "${!REQUIRED_COMMANDS[@]}"; do
@@ -5080,6 +5085,8 @@ function check4RequiredCommands() {
 		writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_PACKAGES "$missing_packages"
 		exitError $RC_MISSING_COMMANDS
 	fi
+
+	logExit "check4RequiredCommands"
 
 }
 
