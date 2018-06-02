@@ -58,11 +58,11 @@ MYSELF=${0##*/}
 MYNAME=${MYSELF%.*}
 MYPID=$$
 
-GIT_DATE="$Date: 2018-04-08 17:49:09 +0200$"
+GIT_DATE="$Date: 2018-06-02 15:43:22 +0200$"
 GIT_DATE_ONLY=${GIT_DATE/: /}
 GIT_DATE_ONLY=$(cut -f 2 -d ' ' <<< $GIT_DATE)
 GIT_TIME_ONLY=$(cut -f 3 -d ' ' <<< $GIT_DATE)
-GIT_COMMIT="$Sha1: af15c2c$"
+GIT_COMMIT="$Sha1: 5c98a16$"
 GIT_COMMIT_ONLY=$(cut -f 2 -d ' ' <<< $GIT_COMMIT | sed 's/\$//')
 
 GIT_CODEVERSION="$MYSELF $VERSION, $GIT_DATE_ONLY/$GIT_TIME_ONLY - $GIT_COMMIT_ONLY"
@@ -85,6 +85,7 @@ PROPERTY_URL="$MYHOMEURL/downloads/raspibackup0613-properties/download"
 VERSION_URL_EN="$MYHOMEURL/en/versionhistory"
 VERSION_URL_DE="$MYHOMEURL/de/versionshistorie"
 LATEST_TEMP_PROPERTY_FILE="/tmp/$MYNAME.properties"
+VARS_FILE="/tmp/$MYNAME.vars"
 DOWNLOAD_TIMEOUT=60 # seconds
 DOWNLOAD_RETRIES=3
 
@@ -863,16 +864,19 @@ MSG_DE[$MSG_NO_HARDLINKS_USED]="RBK0196W: %1 unterstützt keine Hardlinks."
 MSG_EMAIL_SEND_FAILED=197
 MSG_EN[$MSG_EMAIL_SEND_FAILED]="RBK0197E: eMail send command %1 failed with RC %2."
 MSG_DE[$MSG_EMAIL_SEND_FAILED]="RBK0197E: eMail mit %1 versenden endet fehlerhaft mit RC %2."
+MSG_NO_HARDLINKS_USED=198
+MSG_EN[$MSG_NO_HARDLINKS_USED]="RBK0193W: No hardlinks supported on %1."
+MSG_DE[$MSG_NO_HARDLINKS_USED]="RBK0193W: %1 unterstützt keine Hardlinks."
+MSG_MISSING_RESTOREDEVICE_OPTION=199
+MSG_EN[$MSG_MISSING_RESTOREDEVICE_OPTION]="RBK0194E: Option -R requires also option -d."
+MSG_DE[$MSG_MISSING_RESTOREDEVICE_OPTION]="RBK0194E: Option -r benötigt auch Option -d."
 
 declare -A MSG_HEADER=( ['I']="---" ['W']="!!!" ['E']="???" )
 
 # Create message and substitute parameters
 
 function getMessageText() {         # languageflag messagenumber parm1 parm2 ...
-    local msg
-    local p
-    local i
-	local s
+    local msg p i s
 
 	if [[ $1 != "L" ]]; then
 		LANG_SUFF=${1^^*}
@@ -1099,14 +1103,21 @@ function assertionFailed() { # lineno message
 	exit 127
 }
 
-function exitNormal() { #
+function exitNormal() {
+	saveVars
 	rc=0
 	exit 0
+}
+
+function saveVars() {
+	echo "BACKUP_TARGETDIR=\"$BACKUPTARGET_DIR\"" > $VARS_FILE
+	echo "BACKUP_TARGETFILE=\"$BACKUPTARGET_FILE\"" >> $VARS_FILE
 }
 
 function exitError() { # {rc}
 
 	logEntry "exitError $1"
+	saveVars
 	if [[ -n "$1" ]]; then
 		rc="$1"
 	else
@@ -1211,10 +1222,10 @@ function logEntry() { # message
 }
 
 function logExit() { # message
-	(( LOG_INDENT-=3 ))
 	if [[ $LOG_DEBUG == $LOG_LEVEL ]]; then
 		logIntoOutput $LOG_TYPE_DEBUG "<< $1"
 	fi
+	(( LOG_INDENT-=3 ))
 }
 
 function logSystem() {
@@ -1246,6 +1257,7 @@ function logOptions() {
 	logItem "Options: $INVOCATIONPARMS"
 	logExit "logOptions"
 	logItem "APPEND_LOG=$APPEND_LOG"
+	logItem "APPEND_LOG_OPTION=$APPEND_LOG_OPTION"
 	logItem "BACKUPPATH=$BACKUPPATH"
 	logItem "BACKUPTYPE=$BACKUPTYPE"
 	logItem "CHECK_FOR_BAD_BLOCKS=$CHECK_FOR_BAD_BLOCKS"
@@ -1337,6 +1349,8 @@ DEFAULT_MAIL_PROGRAM="mail"
 DEFAULT_RESTORE_DEVICE=""
 # default append log (0 = false, 1 = true)
 DEFAULT_APPEND_LOG=0
+# option used by mail program to append log (for example -a or -A)
+DEFAULT_APPEND_LOG_OPTION="-a"
 # default verbose log (0 = false, 1 = true)
 DEFAULT_VERBOSE=0
 # skip check for remote mount of backup path (0 = false, 1 = true)
@@ -1775,12 +1789,7 @@ function updateScript() { # restart
 
 	logEntry "updateScript"
 
-	local rc
-	local versions
-	local latestVersion
-	local newVersion
-	local oldVersion
-	local newName
+	local rc versions latestVersion newVersion oldVersion newName
 	local updateNow=0
 
 	if (( $NEW_PROPERTIES_FILE )) ; then
@@ -2210,70 +2219,77 @@ function sendEMail() { # content subject
 
 	logEntry "sendEMail"
 
-	if [ -n "$EMAIL" ]; then
-		local attach
-		local content
-		local subject
-		local rc
+	if [[ -n "$EMAIL" && rc != $RC_CTRLC ]]; then
+		local attach content subject
 
 		local attach=""
 		local subject="$2"
 
-		if (( $APPEND_LOG )); then
-			attach="-a $LOG_FILE"
-			logItem "Appendlog $attach"
+		if (( ! $MAIL_ON_ERROR_ONLY || ( $MAIL_ON_ERROR_ONLY && rc != 0 ) )); then
+
+			if (( $APPEND_LOG )); then
+				attach="$DEFAULT_APPEND_LOG_OPTION $LOG_FILE"
+				logItem "Appendlog $attach"
+			fi
+
+			IFS=" "
+			if [ -e "$LOG_MAIL_FILE" ]; then
+				content="$NL$(<"$LOG_MAIL_FILE")$NL$1$NL"
+			else
+				content="$NL$1$NL"
+			fi
+			unset IFS
 		fi
 
 		if (( $NOTIFY_UPDATE && $NEWS_AVAILABLE )); then
-				subject=";-) $subject"
+			subject=";-) $subject"
+			local c1=$(getLocalizedMessage $MSG_NEW_VERSION_AVAILABLE "$newVersion" "$oldVersion")
+			local c2=$(getLocalizedMessage $MSG_VISIT_VERSION_HISTORY_PAGE "$(getLocalizedMessage $MSG_VERSION_HISTORY_PAGE)")
+			content="$c1$NL$c2"
 		fi
 
-		IFS=" "
-		if [ -e "$LOG_MAIL_FILE" ]; then
-			content="$NL$(<"$LOG_MAIL_FILE")$NL$1$NL"
-		else
-			content="$NL$1$NL"
-		fi
-		unset IFS
+		if (( ! $MAIL_ON_ERROR_ONLY || ( $MAIL_ON_ERROR_ONLY && ( rc != 0 || ( $NOTIFY_UPDATE && $NEWS_AVAILABLE ) ) ) )); then
 
-		logItem "Sending eMail with program $EMAIL_PROGRAM and parms '$EMAIL_PARMS'"
-		logItem "Parm1:$1 Parm2:$subject"
-		logItem "Content: $content"
+			logItem "Sending eMail with program $EMAIL_PROGRAM and parms '$EMAIL_PARMS'"
+			logItem "Parm1:$1 Parm2:$subject"
+			logItem "Content: $content"
 
-		case $EMAIL_PROGRAM in
-			$EMAIL_MAILX_PROGRAM) logItem "echo $content | $EMAIL_PROGRAM $EMAIL_PARMS -s $subject $attach $EMAIL"
-				( echo "$content" | "$EMAIL_PROGRAM" $EMAIL_PARMS -s "$subject" $attach "$EMAIL" ) &>> $LOG_FILE
-				rc=$?
-				(( $rc )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_EMAIL_SEND_FAILED "$EMAIL_MAILX_PROGRAM" $rc
-				;;
-			$EMAIL_SENDEMAIL_PROGRAM) logItem "echo $content | $EMAIL_PROGRAM $EMAIL_PARMS -u $subject $attach -t $EMAIL"
-				( echo "$content" | "$EMAIL_PROGRAM" $EMAIL_PARMS -u "$subject" $attach -t "$EMAIL" ) &>> $LOG_FILE
-				rc=$?
-				(( $rc )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_EMAIL_SEND_FAILED "$EMAIL_SENDEMAIL_PROGRAM" $rc
-				;;
-			$EMAIL_SSMTP_PROGRAM)
-				if (( $APPEND_LOG )); then
-					logItem "Sending email with mpack"
-					echo "$content" > /tmp/$$
-					mpack -s "$subject" -d /tmp/$$ "$LOG_FILE" "$EMAIL" &>> $LOG_FILE
-					rm /tmp/$$ &>/dev/null
-				else
-					logItem "Sendig email with ssmtp"
-					logItem "echo -e To: $EMAIL\nFrom: root@$(hostname -f)\nSubject: $subject\n$content | $EMAIL_PROGRAM $EMAIL"
-					( echo -e "To: $EMAIL\nFrom: root@$(hostname -f)\nSubject: $subject\n$content" | "$EMAIL_PROGRAM" "$EMAIL" ) &>> $LOG_FILE
+			local rc
+			case $EMAIL_PROGRAM in
+				$EMAIL_MAILX_PROGRAM) logItem "echo $content | $EMAIL_PROGRAM $EMAIL_PARMS -s $subject $attach $EMAIL"
+					echo "$content" | "$EMAIL_PROGRAM" $EMAIL_PARMS -s "$subject" $attach "$EMAIL"
 					rc=$?
-					(( $rc )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_EMAIL_SEND_FAILED "$EMAIL_SSMTP_PROGRAM" $rc
-				fi
-				;;
-			$EMAIL_EXTENSION_PROGRAM)
-				local append=""
-				(( $APPEND_LOG )) && append="$LOG_FILE"
-				args=( "$EMAIL" "$subject" "$content" "$EMAIL_PARMS" "$append" )
-				callExtensions $EMAIL_EXTENSION "${args[@]}"
-				;;
-			*) assertionFailed $LINENO  "Unsupported email programm $EMAIL_PROGRAM detected"
-				;;
-		esac
+					logItem "$EMAIL_PROGRAM: RC: $rc"
+					;;
+				$EMAIL_SENDEMAIL_PROGRAM) logItem "echo $content | $EMAIL_PROGRAM $EMAIL_PARMS -u $subject $attach -t $EMAIL"
+					echo "$content" | "$EMAIL_PROGRAM" $EMAIL_PARMS -u "$subject" $attach -t "$EMAIL"
+					rc=$?
+					logItem "$EMAIL_PROGRAM: RC: $rc"
+					;;
+				$EMAIL_SSMTP_PROGRAM)
+					if (( $APPEND_LOG )); then
+						logItem "Sending email with mpack"
+						echo "$content" > /tmp/$$
+						mpack -s "$subject" -d /tmp/$$ "$LOG_FILE" "$EMAIL"
+						rm /tmp/$$ &>/dev/null
+					else
+						logItem "Sendig email with ssmtp"
+						logItem "echo -e To: $EMAIL\nFrom: root@$(hostname -f)\nSubject: $subject\n$content | $EMAIL_PROGRAM $EMAIL"
+						echo -e "To: $EMAIL\nFrom: root@$(hostname -f)\nSubject: $subject\n$content" | "$EMAIL_PROGRAM" "$EMAIL"
+						rc=$?
+						logItem "$EMAIL_PROGRAM: RC: $rc"
+					fi
+					;;
+				$EMAIL_EXTENSION_PROGRAM)
+					local append=""
+					(( $APPEND_LOG )) && append="$LOG_FILE"
+					args=( "$EMAIL" "$subject" "$content" "$EMAIL_PARMS" "$append" )
+					callExtensions $EMAIL_EXTENSION "${args[@]}"
+					;;
+				*) assertionFailed $LINENO  "Unsupported email programm $EMAIL_PROGRAM detected"
+					;;
+			esac
+		fi
 	fi
 	logExit "sendEMail"
 
@@ -2328,6 +2344,8 @@ function cleanup() { # trap
 
 	trap noop SIGINT SIGTERM EXIT	# disable all interupts
 
+	(( $STOPPED_SERVICES )) && startServices
+
 	# no logging any more
 
 	if (( $RESTORE )); then
@@ -2351,6 +2369,7 @@ function cleanup() { # trap
 #		no return
 	else
 		logItem "Terminate now with rc $rc"
+		(( $rc == 0 )) && saveVars
 		exit $rc
 	fi
 
@@ -2541,26 +2560,18 @@ function cleanupBackup() { # trap
 			startServices "noexit"
 		fi
 
-		msg=$(getLocalizedMessage $MSG_BACKUP_FAILED)
-		msgTitle=$(getLocalizedMessage $MSG_TITLE_ERROR $HOSTNAME)
-		logItem "emailTitle: $msgTitle"
-		if [ -n "$EMAIL" ]; then
-			if [[ $rc != $RC_CTRLC ]]; then
-				sendEMail "$msg" "$msgTitle"
-			fi
+		if [[ $rc != $RC_CTRLC ]]; then
+			msg=$(getLocalizedMessage $MSG_BACKUP_FAILED)
+			msgTitle=$(getLocalizedMessage $MSG_TITLE_ERROR $HOSTNAME)
+			sendEMail "$msg" "$msgTitle"
 		fi
 
 	else
 		writeToConsole $MSG_LEVEL_MINIMAL $MSG_BACKUP_OK
 
-		if (( ! $MAIL_ON_ERROR_ONLY )); then
+		if [[ $rc != $RC_CTRLC ]]; then
 			msg=$(getLocalizedMessage $MSG_TITLE_OK $HOSTNAME)
-			logItem "emailTitle: $msg"
-			if [ -n "$EMAIL" ]; then
-				if [[ $rc != $RC_CTRLC ]]; then
-					sendEMail "" "$msg"
-				fi
-			fi
+			sendEMail "" "$msg"
 		fi
 	fi
 
@@ -2688,8 +2699,7 @@ function bootPartitionBackup() {
 
 		logEntry "bootPartitionBackup"
 
-		local p
-		local rc
+		local p rc
 
 		logItem "Starting boot partition backup..."
 
@@ -3191,6 +3201,7 @@ function restore() {
 				if (( ! $ROOT_PARTITION_DEFINED )) && (( $RESIZE_ROOTFS )); then
 					local sourceSDSize=$(calcSumSizeFromSFDISK "$SF_FILE")
 					local targetSDSize=$(blockdev --getsize64 $RESTORE_DEVICE)
+					logItem "sourceSDSize: $sourceSDSize - targetSDSize: $targetSDSize"
 
 					if (( sourceSDSize != targetSDSize )); then
 
@@ -3411,11 +3422,15 @@ function backup() {
 		logItem "df -h:$NL$(df -h)"
 		logItem "blkid:$NL$(blkid)"
 
+	if [[ -f $BOOT_DEVICENAME ]]; then
 		logItem "fdisk -l $BOOT_DEVICENAME"
 		logItem "$(fdisk -l $BOOT_DEVICENAME)"
+	fi
 
+	if [[ -f "/boot/cmdline.txt" ]]; then
 		logItem "/boot/cmdline.txt"
 		logItem "$(cat /boot/cmdline.txt)"
+	fi
 
 		logItem "/etc/fstab"
 		logItem "$(cat /etc/fstab)"
@@ -4322,9 +4337,7 @@ function restorePartitionBasedBackup() {
 
 	logEntry "restorePartitionBasedBackup"
 
-	local partition
-	local sourceSize
-	local targetSize
+	local partition sourceSize targetSize
 
 	if [[ "$BACKUPTYPE" != $BACKUPTYPE_DD && "$BACKUPTYPE" != $BACKUPTYPE_DDZ ]]; then
 		if [[ ! -e "$SF_FILE" ]]; then
@@ -4359,9 +4372,8 @@ function restorePartitionBasedBackup() {
 		logItem $(mount | grep $RESTORE_DEVICE)
 	fi
 
-	local sourceSDSize=$(grep "^Disk" -m 1 "$FDISK_FILE" | cut -f 5 -d ' ')
+	local sourceSDSize=$(calcSumSizeFromSFDISK "$SF_FILE")
 	local targetSDSize=$(blockdev --getsize64 $RESTORE_DEVICE)
-
 	logItem "SourceSDSize: $soureSDSize - targetSDSize: $targetSDSize"
 
 	if (( targetSDSize < sourceSDSize )); then
@@ -4464,8 +4476,7 @@ function getBackupPartitionLabel() { # partition
 	logEntry "getBackupPartitionLabel $1"
 
 	local partition=$1
-	local blkid
-	local matches label
+	local blkid matches label
 
 	blkid=$(grep $partition "$BLKID_FILE")
 	logItem "BLKID: $1 - $blkid"
@@ -4603,12 +4614,10 @@ function restorePartitionBasedPartition() { # restorefile
 	logEntry "restorePartitionBasedPartition $1"
 
 	rc=0
-	local verbose zip
+	local verbose zip partitionFormat partitionLabel cmd
+
 	local restoreFile="$1"
 	local restorePartition="$(basename "$restoreFile")"
-	local partitionFormat
-	local partitionLabel
-	local cmd
 
 	logItem "restorePartition: $restorePartition"
 	local partitionNumber
@@ -5224,9 +5233,9 @@ function checkOptionParameter() { # option parameter
 	fi
 }
 
-# -x and -x+ enable, -x- disables flag
-# --opt and --opt+ enable, --opt- disables flag
-# 0 -> disable, 1 -> enable
+# -x and -x+ enables, -x- disables flag
+# --opt and --opt+ enables, --opt- disables flag
+# 0 -> disabled, 1 -> enabled
 function getEnableDisableOption() { # option
 	case "$1" in
 		-*-) echo 0;;
@@ -5266,6 +5275,7 @@ MSG_LEVEL=$DEFAULT_MSG_LEVEL
 VERBOSE=$DEFAULT_VERBOSE
 RESTORE_DEVICE=$DEFAULT_RESTORE_DEVICE
 APPEND_LOG=$DEFAULT_APPEND_LOG
+APPEND_LOG_OPTION="$DEFAULT_APPEND_LOG_OPTION"
 LOG_OUTPUT="$DEFAULT_LOG_OUTPUT"
 SKIPLOCALCHECK=$DEFAULT_SKIPLOCALCHECK
 DD_BLOCKSIZE=$DEFAULT_DD_BLOCKSIZE
@@ -5601,6 +5611,15 @@ done
 # set positional arguments in argument list $@
 set -- $PARAMS
 
+if (( ! $RESTORE )); then
+	lockingFramework
+	exlock_now
+	if (( $? )); then
+		writeToConsole $MSG_LEVEL_MINIMAL $MSG_INSTANCE_ACTIVE
+		exitError $RC_MISC_ERROR
+	fi
+fi
+
 writeToConsole $MSG_LEVEL_MINIMAL $MSG_STARTED "$HOSTNAME" "$MYSELF" "$VERSION" "$(date)" "$GIT_COMMIT_ONLY"
 (( $IS_BETA )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_BETA_MESSAGE
 (( $IS_DEV )) && writeToConsole $MSG_LEVEL_MINIMAL $MSG_INTRO_DEV_MESSAGE
@@ -5671,18 +5690,14 @@ elif [[ -z "$RESTOREFILE" && -z "$BACKUPPATH" ]]; then
 	exitError $RC_MISSING_FILES
 fi
 
+if [[ -z $RESTORE_DEVICE ]] && (( $ROOT_PARTITION_DEFINED )); then
+	writeToConsole $MSG_LEVEL_MINIMAL $MSG_MISSING_RESTOREDEVICE_OPTION
+	exitError $RC_PARAMETER_ERROR
+fi
+
 setupEnvironment
 logOptions						# config parms already read
 logSystem
-
-if (( ! $RESTORE )); then
-	lockingFramework
-	exlock_now
-	if (( $? )); then
-		writeToConsole $MSG_LEVEL_MINIMAL $MSG_INSTANCE_ACTIVE
-		exitError $RC_MISC_ERROR
-	fi
-fi
 
 writeToConsole $MSG_LEVEL_DETAILED $MSG_USING_LOGFILE "$LOG_FILE_FINAL"
 
@@ -5709,4 +5724,3 @@ if isVersionDeprecated "$VERSION"; then
 fi
 
 doit #	no return for backup
-exit $rc
